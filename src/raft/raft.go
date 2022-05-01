@@ -19,6 +19,7 @@ package raft
 
 import (
 	"fmt"
+	"math"
 	"math/rand"
 	"sync"
 	"sync/atomic"
@@ -95,17 +96,17 @@ func (rf *Raft) init() {
 	rf.commitIndex = 0
 	rf.lastApplied = 0
 	rf.state = "follower"
-	rf.electionTimeout = rand.Intn(20) + 100
+	rf.electionTimeout = rand.Intn(100) + 100
 	rf.lastHeartbeat = time.Now()
 	go rf.checkTimeout()
 }
 
 func (rf *Raft) checkTimeout() bool {
 	for {
-		time.Sleep(time.Second)
+		time.Sleep(time.Millisecond * 10)
 		rf.mu.Lock()
 		if time.Now().Sub(rf.lastHeartbeat).Milliseconds() > int64(rf.electionTimeout) {
-			fmt.Println("Initiating leader election")
+			rf.initiateElection()
 		}
 		rf.mu.Unlock()
 	}
@@ -124,8 +125,10 @@ func (ls *LeaderState) init(rf *Raft) {
 // believes it is the leader.
 func (rf *Raft) GetState() (int, bool) {
 
-	var term int
-	var isleader bool
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	var term = rf.currentTerm
+	var isleader = rf.state == "leader"
 	// Your code here (2A).
 	return term, isleader
 }
@@ -195,6 +198,8 @@ type RequestVoteReply struct {
 //
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
 	if rf.currentTerm > args.term {
 		reply.voteGranted = false
 		reply.term = rf.currentTerm
@@ -234,6 +239,55 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 //
 func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *RequestVoteReply) bool {
 	ok := rf.peers[server].Call("Raft.RequestVote", args, reply)
+	return ok
+}
+
+func (rf *Raft) initiateElection() {
+	fmt.Println("Initating election")
+	majority := int(math.Ceil(float64(len(rf.peers)) / 2.0))
+	rf.mu.Lock()
+	rf.currentTerm = rf.currentTerm + 1
+	rf.state = "candidate"
+	rf.votedFor = rf.me
+	voteCt := 1
+	rf.mu.Unlock()
+	for i := range rf.peers {
+		args := &RequestVoteArgs{}
+		reply := &RequestVoteReply{}
+		ok := rf.sendRequestVote(i, args, reply)
+		fmt.Println()
+		if ok && reply.voteGranted {
+			voteCt++
+		}
+		if voteCt >= majority {
+			rf.mu.Lock()
+			defer rf.mu.Unlock()
+			rf.state = "leader"
+			return
+		}
+	}
+}
+
+type AppendEntriesArgs struct {
+	term         int   // leader's term
+	leaderId     int   // so follower can redirect clients
+	prevLogIndex int   // index of log entry immediately precenting new ones
+	prevLogTerm  int   // term of prevLogIndex entry
+	entries      []Log // empty for heartbeat, may send more than 1 for efficiency
+	leaderCommit int   //leader's commit index
+}
+
+type AppendEntriesReply struct {
+	term    int  //current term, for leader to update itself
+	success bool // true if folloewr contained entry matching prevLogIndex and prevLogTerm
+}
+
+func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
+	rf.lastHeartbeat = time.Now()
+}
+
+func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
+	ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
 	return ok
 }
 
