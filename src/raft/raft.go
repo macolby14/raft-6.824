@@ -91,6 +91,8 @@ type Raft struct {
 }
 
 func (rf *Raft) init() {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
 	rf.currentTerm = 0
 	rf.log = make([]Log, 0)
 	rf.commitIndex = 0
@@ -105,10 +107,12 @@ func (rf *Raft) checkTimeout() bool {
 	for {
 		time.Sleep(time.Millisecond * 10)
 		rf.mu.Lock()
-		if time.Now().Sub(rf.lastHeartbeat).Milliseconds() > int64(rf.electionTimeout) {
+		lastHeartbeat := rf.lastHeartbeat
+		electionTimeout := rf.electionTimeout
+		rf.mu.Unlock()
+		if time.Now().Sub(lastHeartbeat).Milliseconds() > int64(electionTimeout) {
 			rf.initiateElection()
 		}
-		rf.mu.Unlock()
 	}
 }
 
@@ -177,10 +181,10 @@ func (rf *Raft) readPersist(data []byte) {
 //
 type RequestVoteArgs struct {
 	// Your data here (2A, 2B).
-	term         int // candidates term
-	candidateId  int //candidate requesting vote
-	lastLogIndex int // index of candidate's last log entry
-	lastLogTerm  int // term of candidate's last log entry
+	Term         int // candidates term
+	CandidateId  int //candidate requesting vote
+	LastLogIndex int // index of candidate's last log entry
+	LastLogTerm  int // term of candidate's last log entry
 }
 
 //
@@ -189,8 +193,8 @@ type RequestVoteArgs struct {
 //
 type RequestVoteReply struct {
 	// Your data here (2A).
-	term        int  // current term, for candidate to update itself
-	voteGranted bool // true means canddiate receiced vote
+	Term        int  // current term, for candidate to update itself
+	VoteGranted bool // true means canddiate receiced vote
 }
 
 //
@@ -200,12 +204,12 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	if rf.currentTerm > args.term {
-		reply.voteGranted = false
-		reply.term = rf.currentTerm
+	if rf.currentTerm > args.Term {
+		reply.VoteGranted = false
+		reply.Term = rf.currentTerm
 		return
 	}
-	reply.voteGranted = true
+	reply.VoteGranted = true
 }
 
 //
@@ -252,11 +256,14 @@ func (rf *Raft) initiateElection() {
 	voteCt := 1
 	rf.mu.Unlock()
 	for i := range rf.peers {
+		if i == rf.me {
+			continue
+		}
 		args := &RequestVoteArgs{}
 		reply := &RequestVoteReply{}
 		ok := rf.sendRequestVote(i, args, reply)
-		fmt.Println()
-		if ok && reply.voteGranted {
+		fmt.Println("Received reply to vote request.", i, reply)
+		if ok && reply.VoteGranted {
 			voteCt++
 		}
 		if voteCt >= majority {
@@ -269,17 +276,17 @@ func (rf *Raft) initiateElection() {
 }
 
 type AppendEntriesArgs struct {
-	term         int   // leader's term
-	leaderId     int   // so follower can redirect clients
-	prevLogIndex int   // index of log entry immediately precenting new ones
-	prevLogTerm  int   // term of prevLogIndex entry
-	entries      []Log // empty for heartbeat, may send more than 1 for efficiency
-	leaderCommit int   //leader's commit index
+	Term         int   // leader's term
+	LeaderId     int   // so follower can redirect clients
+	PrevLogIndex int   // index of log entry immediately precenting new ones
+	PrevLogTerm  int   // term of prevLogIndex entry
+	Entries      []Log // empty for heartbeat, may send more than 1 for efficiency
+	LeaderCommit int   //leader's commit index
 }
 
 type AppendEntriesReply struct {
-	term    int  //current term, for leader to update itself
-	success bool // true if folloewr contained entry matching prevLogIndex and prevLogTerm
+	Term    int  //current term, for leader to update itself
+	Success bool // true if folloewr contained entry matching prevLogIndex and prevLogTerm
 }
 
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
@@ -350,8 +357,6 @@ func (rf *Raft) killed() bool {
 func Make(peers []*labrpc.ClientEnd, me int,
 	persister *Persister, applyCh chan ApplyMsg) *Raft {
 	rf := &Raft{}
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
 	rf.peers = peers
 	rf.persister = persister
 	rf.me = me
