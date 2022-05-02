@@ -279,20 +279,22 @@ func (rf *Raft) initiateElection() {
 			continue
 		}
 		rf.mu.Lock()
-		defer rf.mu.Unlock()
 		fmt.Println(rf.me, "Received reply to vote request.", i, reply)
 		if reply.VoteGranted {
 			voteCt++
 		} else if reply.Term > rf.currentTerm { // we are behind in terms
 			rf.currentTerm = reply.Term
 			rf.state = "follower"
+			rf.mu.Unlock()
 			return
 		}
 		if voteCt >= majority {
 			fmt.Println(rf.me, "Won the election")
 			rf.state = "leader"
+			rf.mu.Unlock()
 			return
 		}
+		rf.mu.Unlock()
 	}
 }
 
