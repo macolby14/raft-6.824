@@ -106,6 +106,12 @@ func (rf *Raft) checkTimeout() bool {
 	for {
 		time.Sleep(time.Millisecond * 100)
 		rf.mu.Lock()
+		if rf.state == "leader" {
+			rf.mu.Unlock()
+			continue
+		}
+		rf.mu.Unlock()
+		rf.mu.Lock()
 		lastHeartbeat := rf.lastHeartbeat
 		electionTimeout := rand.Intn(2000) + 500 // timeout in ms
 		rf.mu.Unlock()
@@ -204,11 +210,11 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	if rf.currentTerm > args.Term { // an election from a previous term
+	if rf.currentTerm > args.Term { // an election from a previous term, need to update the node making the call
 		reply.VoteGranted = false
 		reply.Term = rf.currentTerm
 		return
-	} else if args.Term > rf.currentTerm { // we haven't voted for this term yet
+	} else if args.Term > rf.currentTerm { // we haven't voted for this term yet, so lets vote
 		rf.state = "follower"
 		rf.votedFor = args.CandidateId
 		rf.currentTerm = args.Term
@@ -285,6 +291,9 @@ func (rf *Raft) initiateElection() {
 				rf.state = "follower"
 				return
 			}
+			if rf.state == "leader" { // we already won this election
+				return
+			}
 			DPrintf("%v: Received reply to vote request. %v %v", rf.me, i, reply)
 			if reply.VoteGranted {
 				voteCt++
@@ -317,16 +326,16 @@ type AppendEntriesReply struct {
 
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
 	rf.mu.Lock()
+	defer rf.mu.Unlock()
 	DPrintf("%v: Received heartbeat. %v", rf.me, args)
-	if args.Term < rf.currentTerm {
-		defer rf.mu.Unlock()
+	if args.Term < rf.currentTerm { // heartbeat from an old term, update the calling node
 		reply.Term = rf.currentTerm
 		reply.Success = false
-		return
 	}
+
 	rf.currentTerm = args.Term
 	rf.lastHeartbeat = time.Now()
-	rf.mu.Unlock()
+	rf.state = "follower" // if we get a heartbeat from someone else ahead of us in terms... they were elected leader
 }
 
 func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
