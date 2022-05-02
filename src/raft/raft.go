@@ -18,7 +18,6 @@ package raft
 //
 
 import (
-	"fmt"
 	"math"
 	"math/rand"
 	"sync"
@@ -52,8 +51,8 @@ type ApplyMsg struct {
 // A Go object implementing a single Raft peer.
 //
 type Log struct {
-	term    int
-	command string
+	Term    int
+	Command string
 }
 
 type LeaderState struct { // volatile, reinitiailized after elections
@@ -99,14 +98,14 @@ func (rf *Raft) init() {
 	rf.lastApplied = 0
 	rf.state = "follower"
 	rf.votedFor = -1
-	rf.electionTimeout = rand.Intn(100) + 100
+	rf.electionTimeout = rand.Intn(1000) + 1000 // timeout in ms
 	rf.lastHeartbeat = time.Now()
 	go rf.checkTimeout()
 }
 
 func (rf *Raft) checkTimeout() bool {
 	for {
-		time.Sleep(time.Millisecond * 10)
+		time.Sleep(time.Millisecond * 100)
 		rf.mu.Lock()
 		lastHeartbeat := rf.lastHeartbeat
 		electionTimeout := rf.electionTimeout
@@ -256,7 +255,7 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 }
 
 func (rf *Raft) initiateElection() {
-	fmt.Println(rf.me, "Initating election")
+	DPrintf("%v: Initating election", rf.me)
 	majority := int(math.Ceil(float64(len(rf.peers)) / 2.0))
 	rf.mu.Lock()
 	rf.currentTerm = rf.currentTerm + 1
@@ -264,6 +263,7 @@ func (rf *Raft) initiateElection() {
 	rf.votedFor = rf.me
 	voteCt := 1
 	rf.mu.Unlock()
+	// TODO - RPC calls in goroutine so they don't block
 	for i := range rf.peers {
 		if i == rf.me {
 			continue
@@ -279,7 +279,7 @@ func (rf *Raft) initiateElection() {
 			continue
 		}
 		rf.mu.Lock()
-		fmt.Println(rf.me, "Received reply to vote request.", i, reply)
+		DPrintf("%v: Received reply to vote request. %v %v", rf.me, i, reply)
 		if reply.VoteGranted {
 			voteCt++
 		} else if reply.Term > rf.currentTerm { // we are behind in terms
@@ -289,9 +289,10 @@ func (rf *Raft) initiateElection() {
 			return
 		}
 		if voteCt >= majority {
-			fmt.Println(rf.me, "Won the election")
+			DPrintf("%v: Won the election", rf.me)
 			rf.state = "leader"
 			rf.mu.Unlock()
+			go rf.sendHeartbeats()
 			return
 		}
 		rf.mu.Unlock()
@@ -313,12 +314,42 @@ type AppendEntriesReply struct {
 }
 
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
+	rf.mu.Lock()
+	DPrintf("%v: Received heartbeat. %v", rf.me, args)
+	rf.currentTerm = args.Term
 	rf.lastHeartbeat = time.Now()
+	rf.mu.Unlock()
 }
 
 func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
 	ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
 	return ok
+}
+
+func (rf *Raft) sendHeartbeats() {
+	for {
+		rf.mu.Lock()
+		if rf.state != "leader" {
+			defer rf.mu.Unlock()
+			return
+		}
+		rf.mu.Unlock()
+		for i := range rf.peers {
+			rf.mu.Lock()
+			if i == rf.me {
+				rf.lastHeartbeat = time.Now()
+				rf.mu.Unlock()
+				continue
+			}
+			args := &AppendEntriesArgs{}
+			args.LeaderId = rf.me
+			args.Term = rf.currentTerm
+			reply := &AppendEntriesReply{}
+			rf.mu.Unlock()
+			rf.sendAppendEntries(i, args, reply)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 }
 
 //
