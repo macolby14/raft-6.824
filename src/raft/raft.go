@@ -98,6 +98,7 @@ func (rf *Raft) init() {
 	rf.commitIndex = 0
 	rf.lastApplied = 0
 	rf.state = "follower"
+	rf.votedFor = -1
 	rf.electionTimeout = rand.Intn(100) + 100
 	rf.lastHeartbeat = time.Now()
 	go rf.checkTimeout()
@@ -204,12 +205,20 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	if rf.currentTerm > args.Term {
+	if rf.currentTerm > args.Term { // an election from a previous term
 		reply.VoteGranted = false
 		reply.Term = rf.currentTerm
 		return
+	} else if args.Term > rf.currentTerm { // we haven't voted for this term yet
+		rf.state = "follower"
+		rf.votedFor = args.CandidateId
+		rf.currentTerm = args.Term
+		reply.VoteGranted = true
+		reply.Term = args.Term
+	} else { //already voted for this term
+		reply.VoteGranted = false
+		reply.Term = rf.currentTerm
 	}
-	reply.VoteGranted = true
 }
 
 //
@@ -247,7 +256,7 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 }
 
 func (rf *Raft) initiateElection() {
-	fmt.Println("Initating election")
+	fmt.Println(rf.me, "Initating election")
 	majority := int(math.Ceil(float64(len(rf.peers)) / 2.0))
 	rf.mu.Lock()
 	rf.currentTerm = rf.currentTerm + 1
@@ -260,15 +269,27 @@ func (rf *Raft) initiateElection() {
 			continue
 		}
 		args := &RequestVoteArgs{}
+		rf.mu.Lock()
+		args.CandidateId = rf.me
+		args.Term = rf.currentTerm
+		rf.mu.Unlock()
 		reply := &RequestVoteReply{}
 		ok := rf.sendRequestVote(i, args, reply)
-		fmt.Println("Received reply to vote request.", i, reply)
-		if ok && reply.VoteGranted {
+		if !ok { // no response
+			continue
+		}
+		rf.mu.Lock()
+		defer rf.mu.Unlock()
+		fmt.Println(rf.me, "Received reply to vote request.", i, reply)
+		if reply.VoteGranted {
 			voteCt++
+		} else if reply.Term > rf.currentTerm { // we are behind in terms
+			rf.currentTerm = reply.Term
+			rf.state = "follower"
+			return
 		}
 		if voteCt >= majority {
-			rf.mu.Lock()
-			defer rf.mu.Unlock()
+			fmt.Println(rf.me, "Won the election")
 			rf.state = "leader"
 			return
 		}
