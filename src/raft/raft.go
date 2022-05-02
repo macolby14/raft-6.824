@@ -348,20 +348,25 @@ func (rf *Raft) sendHeartbeats() {
 				rf.mu.Unlock()
 				continue
 			}
-			args := &AppendEntriesArgs{}
-			args.LeaderId = rf.me
-			args.Term = rf.currentTerm
-			reply := &AppendEntriesReply{}
 			rf.mu.Unlock()
-			rf.sendAppendEntries(i, args, reply)
-			rf.mu.Lock()
-			if reply.Term > rf.currentTerm {
-				defer rf.mu.Unlock()
-				rf.state = "follower"
-				rf.currentTerm = reply.Term
-				return
-			}
-			rf.mu.Unlock()
+
+			go func(i int) {
+				rf.mu.Lock()
+				args := &AppendEntriesArgs{}
+				args.LeaderId = rf.me
+				args.Term = rf.currentTerm
+				reply := &AppendEntriesReply{}
+				rf.mu.Unlock()
+				rf.sendAppendEntries(i, args, reply)
+				rf.mu.Lock()
+				if reply.Term > rf.currentTerm {
+					defer rf.mu.Unlock()
+					rf.state = "follower"
+					rf.currentTerm = reply.Term
+					return
+				}
+				rf.mu.Unlock()
+			}(i)
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
