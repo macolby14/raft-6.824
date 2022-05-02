@@ -264,39 +264,40 @@ func (rf *Raft) initiateElection() {
 	rf.votedFor = rf.me
 	voteCt := 1
 	rf.mu.Unlock()
-	// TODO - RPC calls in goroutine so they don't block
 	for i := range rf.peers {
 		if i == rf.me {
 			continue
 		}
-		args := &RequestVoteArgs{}
-		rf.mu.Lock()
-		args.CandidateId = rf.me
-		args.Term = rf.currentTerm
-		rf.mu.Unlock()
-		reply := &RequestVoteReply{}
-		ok := rf.sendRequestVote(i, args, reply)
-		if !ok { // no response
-			continue
-		}
-		rf.mu.Lock()
-		DPrintf("%v: Received reply to vote request. %v %v", rf.me, i, reply)
-		if reply.VoteGranted {
-			voteCt++
-		} else if reply.Term > rf.currentTerm { // we are behind in terms
-			rf.currentTerm = reply.Term
-			rf.state = "follower"
+		go func(i int) {
+			rf.mu.Lock()
+			args := &RequestVoteArgs{}
+			args.CandidateId = rf.me
+			args.Term = rf.currentTerm
+			reply := &RequestVoteReply{}
 			rf.mu.Unlock()
-			return
-		}
-		if voteCt >= majority {
-			DPrintf("%v: Won the election", rf.me)
-			rf.state = "leader"
-			rf.mu.Unlock()
-			go rf.sendHeartbeats()
-			return
-		}
-		rf.mu.Unlock()
+			ok := rf.sendRequestVote(i, args, reply)
+			rf.mu.Lock()
+			defer rf.mu.Unlock()
+			if !ok { // no response from rpc
+				return
+			}
+			if args.Term != rf.currentTerm { // candidate changed terms during an election
+				rf.state = "follower"
+				return
+			}
+			DPrintf("%v: Received reply to vote request. %v %v", rf.me, i, reply)
+			if reply.VoteGranted {
+				voteCt++
+			} else if reply.Term > rf.currentTerm { // we are behind in terms
+				rf.currentTerm = reply.Term
+				rf.state = "follower"
+			}
+			if rf.currentTerm == args.Term && voteCt >= majority {
+				DPrintf("%v: Won the election", rf.me)
+				rf.state = "leader"
+				go rf.sendHeartbeats()
+			}
+		}(i)
 	}
 }
 
