@@ -98,7 +98,6 @@ func (rf *Raft) init() {
 	rf.lastApplied = 0
 	rf.state = "follower"
 	rf.votedFor = -1
-	rf.electionTimeout = rand.Intn(1000) + 1000 // timeout in ms
 	rf.lastHeartbeat = time.Now()
 	go rf.checkTimeout()
 }
@@ -108,9 +107,10 @@ func (rf *Raft) checkTimeout() bool {
 		time.Sleep(time.Millisecond * 100)
 		rf.mu.Lock()
 		lastHeartbeat := rf.lastHeartbeat
-		electionTimeout := rf.electionTimeout
+		electionTimeout := rand.Intn(2000) + 500 // timeout in ms
 		rf.mu.Unlock()
 		if time.Now().Sub(lastHeartbeat).Milliseconds() > int64(electionTimeout) {
+			DPrintf("%v: Time passed: %v. electionTimeout: %v", rf.me, time.Now().Sub(lastHeartbeat).Milliseconds(), electionTimeout)
 			rf.initiateElection()
 		}
 	}
@@ -255,9 +255,10 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 }
 
 func (rf *Raft) initiateElection() {
-	DPrintf("%v: Initating election", rf.me)
-	majority := int(math.Ceil(float64(len(rf.peers)) / 2.0))
 	rf.mu.Lock()
+	DPrintf("%v: Initating election", rf.me)
+	rf.lastHeartbeat = time.Now()
+	majority := int(math.Ceil(float64(len(rf.peers)) / 2.0))
 	rf.currentTerm = rf.currentTerm + 1
 	rf.state = "candidate"
 	rf.votedFor = rf.me
@@ -316,6 +317,12 @@ type AppendEntriesReply struct {
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
 	rf.mu.Lock()
 	DPrintf("%v: Received heartbeat. %v", rf.me, args)
+	if args.Term < rf.currentTerm {
+		defer rf.mu.Unlock()
+		reply.Term = rf.currentTerm
+		reply.Success = false
+		return
+	}
 	rf.currentTerm = args.Term
 	rf.lastHeartbeat = time.Now()
 	rf.mu.Unlock()
@@ -347,6 +354,14 @@ func (rf *Raft) sendHeartbeats() {
 			reply := &AppendEntriesReply{}
 			rf.mu.Unlock()
 			rf.sendAppendEntries(i, args, reply)
+			rf.mu.Lock()
+			if reply.Term > rf.currentTerm {
+				defer rf.mu.Unlock()
+				rf.state = "follower"
+				rf.currentTerm = reply.Term
+				return
+			}
+			rf.mu.Unlock()
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
