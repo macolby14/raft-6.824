@@ -397,6 +397,11 @@ func (rf *Raft) sendHeartbeats() {
 // the leader.
 //
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
+
+	if rf.state != "leader" {
+		return -1, -1, false
+	}
+
 	index := -1
 	term := -1
 	isLeader := true
