@@ -52,7 +52,7 @@ type ApplyMsg struct {
 //
 type Log struct {
 	Term    int
-	Command string
+	Command interface{}
 }
 
 type LeaderState struct { // volatile, reinitiailized after elections
@@ -400,6 +400,23 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 
 	if rf.state != "leader" {
 		return -1, -1, false
+	}
+
+	newLog := &Log{
+		Term:    rf.currentTerm,
+		Command: command,
+	}
+
+	for i := range rf.peers {
+		args := &AppendEntriesArgs{}
+		reply := &AppendEntriesReply{}
+		args.Term = rf.currentTerm
+		args.LeaderId = rf.me
+		args.PrevLogIndex = rf.lastApplied // is this right?
+		args.Entries = []Log{*newLog}
+		args.LeaderCommit = rf.commitIndex
+		rf.sendAppendEntries(i, args, reply)
+		// TODO - send logs to peers
 	}
 
 	index := -1
