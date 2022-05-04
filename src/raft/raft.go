@@ -52,7 +52,7 @@ type ApplyMsg struct {
 //
 type Log struct {
 	Term    int
-	Command string
+	Command interface{}
 }
 
 type LeaderState struct { // volatile, reinitiailized after elections
@@ -400,6 +400,12 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 
 	if rf.state != "leader" {
 		return -1, -1, false
+	}
+
+	for i, s := range rf.peers {
+		args := &AppendEntriesArgs{}
+		reply := &AppendEntriesReply{}
+
 	}
 
 	index := -1
