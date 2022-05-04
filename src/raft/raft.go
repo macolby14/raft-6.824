@@ -405,7 +405,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	for i, s := range rf.peers {
 		args := &AppendEntriesArgs{}
 		reply := &AppendEntriesReply{}
-
+		// TODO - send logs to peers
 	}
 
 	index := -1
