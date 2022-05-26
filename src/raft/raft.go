@@ -24,7 +24,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"../labrpc"
+	"raft-6.824/labrpc"
 )
 
 // import "bytes"

@@ -15,7 +15,7 @@ import (
 	"sync"
 	"testing"
 
-	"../labrpc"
+	"raft-6.824/labrpc"
 
 	crand "crypto/rand"
 	"encoding/base64"
