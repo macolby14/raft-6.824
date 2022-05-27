@@ -154,13 +154,13 @@ func (rf *Raft) GetState() (int, bool) {
 func (rf *Raft) persist() {
 	// Your code here (2C).
 	// Example:
-	 w := new(bytes.Buffer)
-	 e := labgob.NewEncoder(w)
-	 rf.mu.Lock()
-	 e.Encode(rf.currentTerm)
-	 e.Encode(rf.votedFor)
-	 e.Encode(rf.log)
-	 rf.mu.Unlock()
+	w := new(bytes.Buffer)
+	e := labgob.NewEncoder(w)
+	rf.mu.Lock()
+	e.Encode(rf.currentTerm)
+	e.Encode(rf.votedFor)
+	e.Encode(rf.log)
+	rf.mu.Unlock()
 	data := w.Bytes()
 	rf.persister.SaveRaftState(data)
 }
@@ -179,17 +179,17 @@ func (rf *Raft) readPersist(data []byte) {
 	var currentTerm int
 	var votedFor int
 	var log []Log
-	 if d.Decode(&currentTerm) != nil ||
-	    d.Decode(&votedFor) != nil ||
+	if d.Decode(&currentTerm) != nil ||
+		d.Decode(&votedFor) != nil ||
 		d.Decode(&log) != nil {
 		panic("Error decoding in readPersist")
-	 } else {
+	} else {
 		rf.mu.Lock()
-	   	rf.currentTerm = currentTerm 
-	   	rf.votedFor = votedFor
-	   	rf.log = log
+		rf.currentTerm = currentTerm
+		rf.votedFor = votedFor
+		rf.log = log
 		rf.mu.Unlock()
-	 }
+	}
 }
 
 //
@@ -432,18 +432,17 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	term := -1
 	isLeader := true
 
-
 	for i := range rf.peers {
 
-		if i == rf.leader.rf.me {
+		if i == rf.me {
 			rf.mu.Lock()
 			rf.log = append(rf.log, *newLog)
 			rf.mu.Unlock()
 			continue
 		}
 
-		go func(){
-		// retry indefinitely
+		go func() {
+			// retry indefinitely
 			ok := false
 			args := &AppendEntriesArgs{}
 			reply := &AppendEntriesReply{}
