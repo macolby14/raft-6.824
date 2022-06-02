@@ -88,7 +88,6 @@ type Raft struct {
 	lastApplied int //inderx of highest log entry applied to state machine
 
 	leader          LeaderState //candidate, follower, or leader
-	electionTimeout int         // random time in ms before starts an election
 	lastHeartbeat   time.Time   // last time received a message from the leader, chosen to start an election
 }
 
