@@ -128,7 +128,7 @@ func (ls *LeaderState) init(rf *Raft) {
 	ls.rf = rf
 	ls.nextIndex = make([]int, len(ls.rf.peers))
 	for i := range ls.nextIndex {
-		ls.nextIndex[i] = len(ls.rf.log) + 1
+		ls.nextIndex[i] = len(ls.rf.log)
 	}
 	ls.matchIndex = make([]int, len(ls.rf.peers))
 }
@@ -346,8 +346,6 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	}
 
 	reply.Term = args.Term
-	reply.Success = true
-
 	rf.log = append(rf.log, args.Entries...)
 	rf.currentTerm = args.Term
 	rf.lastHeartbeat = time.Now()
@@ -379,8 +377,17 @@ func (rf *Raft) sendHeartbeats() {
 			go func(i int) {
 				rf.mu.Lock()
 				args := &AppendEntriesArgs{}
-				args.LeaderId = rf.me
 				args.Term = rf.currentTerm
+				args.LeaderId = rf.me
+				args.PrevLogIndex = rf.leader.nextIndex[i] - 1
+				if args.PrevLogIndex == - 1 {
+					args.PrevLogTerm = -1
+					args.Entries = make([]Log, 0)
+				}else {
+					args.PrevLogTerm = rf.log[args.PrevLogIndex].Term
+					args.Entries = rf.log[args.PrevLogIndex:args.PrevLogIndex+1]
+				}
+				args.LeaderCommit = rf.commitIndex
 				reply := &AppendEntriesReply{}
 				rf.mu.Unlock()
 				rf.sendAppendEntries(i, args, reply)
