@@ -415,60 +415,19 @@ func (rf *Raft) sendHeartbeats() {
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
 
 	rf.mu.Lock()
+	defer rf.mu.Unlock()
 	if rf.state != "leader" {
-		defer rf.mu.Unlock()
 		return -1, -1, false
 	}
-	rf.mu.Unlock()
 
-	rf.mu.Lock()
 	newLog := &Log{
 		Term:    rf.currentTerm,
 		Command: command,
 	}
-	rf.mu.Unlock()
-
-	index := -1
-	term := -1
+	rf.log = append(rf.log, *newLog)
+	index := len(rf.log) - 1
+	term := rf.currentTerm
 	isLeader := true
-
-	for i := range rf.peers {
-
-		if i == rf.me {
-			rf.mu.Lock()
-			rf.log = append(rf.log, *newLog)
-			rf.mu.Unlock()
-			continue
-		}
-
-		go func() {
-			// retry indefinitely
-			ok := false
-			args := &AppendEntriesArgs{}
-			reply := &AppendEntriesReply{}
-			for !ok {
-				rf.mu.Lock()
-				args.Term = rf.currentTerm
-				args.LeaderId = rf.me
-				args.PrevLogIndex = rf.lastApplied // is this right?
-				args.Entries = []Log{*newLog}
-				args.LeaderCommit = rf.commitIndex
-				if rf.state != "leader" {
-					defer rf.mu.Unlock()
-					return
-				}
-				rf.mu.Unlock()
-				ok = rf.sendAppendEntries(i, args, reply)
-			}
-
-			rf.mu.Lock()
-			if !reply.Success {
-				rf.state = "follower"
-				rf.currentTerm = reply.Term
-			}
-			rf.mu.Unlock()
-		}()
-	}
 
 	return index, term, isLeader
 }
