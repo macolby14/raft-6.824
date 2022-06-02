@@ -314,6 +314,7 @@ func (rf *Raft) initiateElection() {
 			if rf.currentTerm == args.Term && voteCt >= majority {
 				DPrintf("%v: Won the election", rf.me)
 				rf.state = "leader"
+				rf.leader.init(rf)
 				go rf.sendHeartbeats()
 			}
 		}(i)
