@@ -89,6 +89,8 @@ type Raft struct {
 
 	leader        LeaderState //candidate, follower, or leader
 	lastHeartbeat time.Time   // last time received a message from the leader, chosen to start an election
+
+	applyCh chan ApplyMsg
 }
 
 func (rf *Raft) init() {
@@ -436,8 +438,10 @@ func (rf *Raft) sendHeartbeats() {
 						}
 					}
 					DPrintf("%v: Agree Ct to see if commit: %v. Commit Index: %v", rf.me, agreeCt, rf.commitIndex)
-					if agreeCt > len(rf.peers)/2 {
+					if rf.leader.matchIndex[i] != -1 && agreeCt > len(rf.peers)/2 {
 						rf.commitIndex = rf.leader.matchIndex[i]
+						applied := &ApplyMsg{true, rf.log[rf.leader.matchIndex[i]], rf.commitIndex}
+						rf.applyCh <- *applied
 					}
 				} else {
 					DPrintf("%v: Heartbeat to %v fails.", rf.me, i)
@@ -522,6 +526,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.peers = peers
 	rf.persister = persister
 	rf.me = me
+	rf.applyCh = applyCh
 
 	// Your initialization code here (2A, 2B, 2C).
 	rf.init()
