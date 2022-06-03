@@ -368,8 +368,10 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	reply.Success = true
 	rf.log = append(rf.log, args.Entries...)
-	if len(rf.log)-1 <= args.LeaderCommit {
+	if len(rf.log)-1 <= args.LeaderCommit && len(rf.log)-1 >= 0 {
 		rf.commitIndex = len(rf.log) - 1
+		applied := &ApplyMsg{true, rf.log[rf.commitIndex].Command, rf.commitIndex}
+		rf.applyCh <- *applied
 	}
 	DPrintf("%v (%v): Append/Heartbeat succeeded. My log: %v. My commitIndex: %v", rf.me, rf.state, rf.log, rf.commitIndex)
 }
@@ -440,7 +442,7 @@ func (rf *Raft) sendHeartbeats() {
 					DPrintf("%v: Agree Ct to see if commit: %v. Commit Index: %v", rf.me, agreeCt, rf.commitIndex)
 					if rf.leader.matchIndex[i] != -1 && agreeCt > len(rf.peers)/2 {
 						rf.commitIndex = rf.leader.matchIndex[i]
-						applied := &ApplyMsg{true, rf.log[rf.leader.matchIndex[i]], rf.commitIndex}
+						applied := &ApplyMsg{true, rf.log[rf.leader.matchIndex[i]].Command, rf.commitIndex}
 						rf.applyCh <- *applied
 					}
 				} else {
