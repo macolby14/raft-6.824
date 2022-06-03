@@ -87,8 +87,8 @@ type Raft struct {
 	commitIndex int //highest log entry known to be commited
 	lastApplied int //inderx of highest log entry applied to state machine
 
-	leader          LeaderState //candidate, follower, or leader
-	lastHeartbeat   time.Time   // last time received a message from the leader, chosen to start an election
+	leader        LeaderState //candidate, follower, or leader
+	lastHeartbeat time.Time   // last time received a message from the leader, chosen to start an election
 }
 
 func (rf *Raft) init() {
@@ -338,18 +338,34 @@ type AppendEntriesReply struct {
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+
+	reply.Success = false
+	reply.Term = rf.currentTerm
+
 	DPrintf("%v: Received heartbeat. %v", rf.me, args)
 	if args.Term < rf.currentTerm { // heartbeat from an old term, update the calling node
-		reply.Term = rf.currentTerm
-		reply.Success = false
 		return
 	}
 
-	reply.Term = args.Term
-	rf.log = append(rf.log, args.Entries...)
-	rf.currentTerm = args.Term
+	/*
+		- Case 1: Has the log and is the correct term. Is up to date
+		- Case 2: Has the log, but different term. Need to back up.
+		- Case 3: Does not have the log.
+	*/
+
 	rf.lastHeartbeat = time.Now()
 	rf.state = "follower" // if we get a heartbeat from someone else ahead of us in terms... they were elected leader
+
+	if args.PrevLogIndex != -1 && args.PrevLogIndex < len(rf.log) {
+		return
+	}
+
+	if args.PrevLogIndex != -1 && rf.log[args.PrevLogIndex].Term != args.PrevLogTerm {
+		return
+	}
+
+	reply.Success = true
+	rf.log = append(rf.log, args.Entries...)
 }
 
 func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
@@ -380,23 +396,32 @@ func (rf *Raft) sendHeartbeats() {
 				args.Term = rf.currentTerm
 				args.LeaderId = rf.me
 				args.PrevLogIndex = rf.leader.nextIndex[i] - 1
-				if args.PrevLogIndex == - 1 {
+				DPrintf("%v: %v", rf.me, args.PrevLogIndex)
+				if args.PrevLogIndex == -1 {
 					args.PrevLogTerm = -1
 					args.Entries = make([]Log, 0)
-				}else {
+				} else {
 					args.PrevLogTerm = rf.log[args.PrevLogIndex].Term
-					args.Entries = rf.log[args.PrevLogIndex:args.PrevLogIndex+1]
+					args.Entries = rf.log[args.PrevLogIndex : args.PrevLogIndex+1]
 				}
 				args.LeaderCommit = rf.commitIndex
 				reply := &AppendEntriesReply{}
 				rf.mu.Unlock()
-				rf.sendAppendEntries(i, args, reply)
+				ok := rf.sendAppendEntries(i, args, reply)
+				if !ok {
+					return
+				}
 				rf.mu.Lock()
 				if reply.Term > rf.currentTerm {
 					defer rf.mu.Unlock()
 					rf.state = "follower"
 					rf.currentTerm = reply.Term
 					return
+				}
+				if reply.Success {
+					rf.leader.nextIndex[i] += len(args.Entries)
+				} else {
+					rf.leader.nextIndex[i]--
 				}
 				rf.mu.Unlock()
 			}(i)
