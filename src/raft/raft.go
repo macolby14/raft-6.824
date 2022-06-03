@@ -342,7 +342,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	reply.Success = false
 	reply.Term = rf.currentTerm
 
-	DPrintf("%v: Received heartbeat. %v", rf.me, args)
+	DPrintf("%v: Received heartbeat.Entries: %v. PrevLogIndex: %v. PrevLogTerm: %v", rf.me, args.Entries, args.PrevLogIndex, args.PrevLogTerm)
 	if args.Term < rf.currentTerm { // heartbeat from an old term, update the calling node
 		return
 	}
@@ -356,7 +356,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	rf.lastHeartbeat = time.Now()
 	rf.state = "follower" // if we get a heartbeat from someone else ahead of us in terms... they were elected leader
 
-	if args.PrevLogIndex != -1 && args.PrevLogIndex < len(rf.log) {
+	if args.PrevLogIndex != -1 && args.PrevLogIndex >= len(rf.log) {
 		return
 	}
 
@@ -366,6 +366,8 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	reply.Success = true
 	rf.log = append(rf.log, args.Entries...)
+
+	DPrintf("%v: Append/Heartbeat succeeded. My log: %v", rf.me, rf.log)
 }
 
 func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
@@ -396,13 +398,16 @@ func (rf *Raft) sendHeartbeats() {
 				args.Term = rf.currentTerm
 				args.LeaderId = rf.me
 				args.PrevLogIndex = rf.leader.nextIndex[i] - 1
-				DPrintf("%v: %v", rf.me, args.PrevLogIndex)
+				DPrintf("%v: %v %v", rf.me, rf.log, args.PrevLogIndex)
 				if args.PrevLogIndex == -1 {
 					args.PrevLogTerm = -1
-					args.Entries = make([]Log, 0)
 				} else {
 					args.PrevLogTerm = rf.log[args.PrevLogIndex].Term
-					args.Entries = rf.log[args.PrevLogIndex : args.PrevLogIndex+1]
+				}
+				if len(rf.log) > rf.leader.nextIndex[i] {
+					args.Entries = rf.log[rf.leader.nextIndex[i] : rf.leader.nextIndex[i]+1]
+				} else {
+					args.Entries = make([]Log, 0)
 				}
 				args.LeaderCommit = rf.commitIndex
 				reply := &AppendEntriesReply{}
@@ -419,8 +424,10 @@ func (rf *Raft) sendHeartbeats() {
 					return
 				}
 				if reply.Success {
+					DPrintf("%v: Heartbeat to %v succeeds.", rf.me, i)
 					rf.leader.nextIndex[i] += len(args.Entries)
 				} else {
+					DPrintf("%v: Heartbeat to %v fails.", rf.me, i)
 					rf.leader.nextIndex[i]--
 				}
 				rf.mu.Unlock()
