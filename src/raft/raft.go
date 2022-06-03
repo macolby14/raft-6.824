@@ -96,8 +96,8 @@ func (rf *Raft) init() {
 	defer rf.mu.Unlock()
 	rf.currentTerm = 0
 	rf.log = make([]Log, 0)
-	rf.commitIndex = 0
-	rf.lastApplied = 0
+	rf.commitIndex = -1
+	rf.lastApplied = -1
 	rf.state = "follower"
 	rf.votedFor = -1
 	rf.lastHeartbeat = time.Now()
@@ -342,7 +342,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	reply.Success = false
 	reply.Term = rf.currentTerm
 
-	DPrintf("%v: Received heartbeat.Entries: %v. PrevLogIndex: %v. PrevLogTerm: %v", rf.me, args.Entries, args.PrevLogIndex, args.PrevLogTerm)
+	DPrintf("%v (%v): Received heartbeat.Entries: %v. PrevLogIndex: %v. PrevLogTerm: %v", rf.me, rf.state, args.Entries, args.PrevLogIndex, args.PrevLogTerm)
 	if args.Term < rf.currentTerm { // heartbeat from an old term, update the calling node
 		return
 	}
@@ -366,8 +366,10 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	reply.Success = true
 	rf.log = append(rf.log, args.Entries...)
-
-	DPrintf("%v: Append/Heartbeat succeeded. My log: %v", rf.me, rf.log)
+	if len(rf.log)-1 <= args.LeaderCommit {
+		rf.commitIndex = len(rf.log) - 1
+	}
+	DPrintf("%v (%v): Append/Heartbeat succeeded. My log: %v. My commitIndex: %v", rf.me, rf.state, rf.log, rf.commitIndex)
 }
 
 func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
@@ -398,7 +400,7 @@ func (rf *Raft) sendHeartbeats() {
 				args.Term = rf.currentTerm
 				args.LeaderId = rf.me
 				args.PrevLogIndex = rf.leader.nextIndex[i] - 1
-				DPrintf("%v: %v %v", rf.me, rf.log, args.PrevLogIndex)
+				DPrintf("%v (%v): Sending Heartbeats. My log: %v. My commitIndex: %v", rf.me, rf.state, rf.log, rf.commitIndex)
 				if args.PrevLogIndex == -1 {
 					args.PrevLogTerm = -1
 				} else {
@@ -424,8 +426,19 @@ func (rf *Raft) sendHeartbeats() {
 					return
 				}
 				if reply.Success {
-					DPrintf("%v: Heartbeat to %v succeeds.", rf.me, i)
+					DPrintf("%v (%v): Heartbeat to %v succeeds.", rf.me, rf.state, i)
 					rf.leader.nextIndex[i] += len(args.Entries)
+					rf.leader.matchIndex[i] = rf.leader.nextIndex[i] - 1
+					agreeCt := 0
+					for j := range rf.leader.matchIndex {
+						if j == rf.me || rf.leader.matchIndex[j] >= rf.leader.matchIndex[i] {
+							agreeCt++
+						}
+					}
+					DPrintf("%v: Agree Ct to see if commit: %v. Commit Index: %v", rf.me, agreeCt, rf.commitIndex)
+					if agreeCt > len(rf.peers)/2 {
+						rf.commitIndex = rf.leader.matchIndex[i]
+					}
 				} else {
 					DPrintf("%v: Heartbeat to %v fails.", rf.me, i)
 					rf.leader.nextIndex[i]--
