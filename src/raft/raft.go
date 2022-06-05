@@ -247,9 +247,11 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 			reply.VoteGranted = true
 		} else {
 			reply.VoteGranted = false
+			DPrintf("%v (%v): Denying vote to %v because its log is not up to date. Other (Term and Index) (%v %v). My (Term and Index): (%v %v)\n", rf.me, rf.state, args.CandidateId, args.LastLogTerm, args.LastLogIndex, lastLogTerm, lastLogIndex)
 		}
 	} else { //already voted for this term
 		// TODO - Why do we think we already voted? We could have restarted and need to check our voted state
+		DPrintf("%v (%v): Denying vote to %v because we already voted for %v.\n", rf.me, rf.state, args.CandidateId, rf.votedFor)
 		reply.VoteGranted = false
 		reply.Term = rf.currentTerm
 	}
@@ -306,6 +308,12 @@ func (rf *Raft) initiateElection() {
 		go func(i int) {
 			rf.mu.Lock()
 			args := &RequestVoteArgs{}
+			args.LastLogIndex = len(rf.log)
+			if len(rf.log) > 0 {
+				args.LastLogTerm = rf.log[len(rf.log)-1].Term
+			} else {
+				args.LastLogTerm = -1
+			}
 			args.CandidateId = rf.me
 			args.Term = rf.currentTerm
 			reply := &RequestVoteReply{}
@@ -527,7 +535,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 func (rf *Raft) Kill() {
 	atomic.StoreInt32(&rf.dead, 1)
 	// Your code here, if desired.
-	fmt.Printf("%v (%v): Killed. Log: %v \n", rf.me, rf.state, rf.log)
+	DPrintf("%v (%v): Killed. Log: %v \n", rf.me, rf.state, rf.log)
 }
 
 func (rf *Raft) killed() bool {
