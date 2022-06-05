@@ -360,6 +360,9 @@ type AppendEntriesArgs struct {
 type AppendEntriesReply struct {
 	Term    int  //current term, for leader to update itself
 	Success bool // true if folloewr contained entry matching prevLogIndex and prevLogTerm
+	XTerm   int  // term in the concluding entry
+	XIndex  int  // index of first entry with term
+	XLen    int  // log length
 }
 
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
@@ -383,14 +386,24 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	rf.lastHeartbeat = time.Now()
 	rf.state = "follower" // if we get a heartbeat from someone else ahead of us in terms... they were elected leader
 
+	reply.XLen = len(rf.log)
+
 	// Follower is missing some logs. Follower doesn't have what the leader wants to check
 	if args.PrevLogIndex > len(rf.log) {
+		reply.XTerm = 0
+		reply.XIndex = 0
 		return
 	}
 
 	// Follower has a different log at PrevLogIndex than leader
 	if args.PrevLogIndex != 0 && rf.log[args.PrevLogIndex-1].Term != args.PrevLogTerm {
-		rf.log = rf.log[0 : args.PrevLogIndex-1]
+		reply.XTerm = rf.log[args.PrevLogIndex-1].Term
+		for i := args.PrevLogIndex - 1; i >= 0; i-- {
+			if rf.log[i].Term != reply.XTerm {
+				return
+			}
+			reply.XIndex = i + 1
+		}
 		return
 	}
 
