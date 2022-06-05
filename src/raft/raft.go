@@ -396,10 +396,14 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	reply.Success = true
 	rf.log = append(rf.log, args.Entries...)
-	if len(rf.log) <= args.LeaderCommit && len(rf.log)-1 >= 0 {
+	if len(rf.log) <= args.LeaderCommit && len(rf.log) > 0 {
+		oldCommit := rf.commitIndex
 		rf.commitIndex = len(rf.log)
-		applied := &ApplyMsg{true, rf.log[rf.commitIndex-1].Command, rf.commitIndex}
-		rf.applyCh <- *applied
+		for i, log := range rf.log[oldCommit:rf.commitIndex] {
+			applied := &ApplyMsg{true, log.Command, oldCommit + 1 + i}
+			rf.applyCh <- *applied
+		}
+
 	}
 	DPrintf("%v (%v): Append/Heartbeat succeeded. My log: %v. My commitIndex: %v", rf.me, rf.state, rf.log, rf.commitIndex)
 }
