@@ -98,8 +98,8 @@ func (rf *Raft) init() {
 	defer rf.mu.Unlock()
 	rf.currentTerm = 0
 	rf.log = make([]Log, 0)
-	rf.commitIndex = -1
-	rf.lastApplied = -1
+	rf.commitIndex = 0
+	rf.lastApplied = 0
 	rf.state = "follower"
 	rf.votedFor = -1
 	rf.lastHeartbeat = time.Now()
@@ -130,7 +130,7 @@ func (ls *LeaderState) init(rf *Raft) {
 	ls.rf = rf
 	ls.nextIndex = make([]int, len(ls.rf.peers))
 	for i := range ls.nextIndex {
-		ls.nextIndex[i] = len(ls.rf.log)
+		ls.nextIndex[i] = len(ls.rf.log) + 1
 	}
 	ls.matchIndex = make([]int, len(ls.rf.peers))
 }
@@ -358,19 +358,21 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	rf.lastHeartbeat = time.Now()
 	rf.state = "follower" // if we get a heartbeat from someone else ahead of us in terms... they were elected leader
 
-	if args.PrevLogIndex != -1 && args.PrevLogIndex >= len(rf.log) {
+	// Follower is missing some logs. Follower doesn't have what the leader wants to check
+	if args.PrevLogIndex > len(rf.log) {
 		return
 	}
 
-	if args.PrevLogIndex != -1 && rf.log[args.PrevLogIndex].Term != args.PrevLogTerm {
+	// Follower has a different log at PrevLogIndex than leader
+	if args.PrevLogIndex != 0 && rf.log[args.PrevLogIndex-1].Term != args.PrevLogTerm {
 		return
 	}
 
 	reply.Success = true
 	rf.log = append(rf.log, args.Entries...)
-	if len(rf.log)-1 <= args.LeaderCommit && len(rf.log)-1 >= 0 {
-		rf.commitIndex = len(rf.log) - 1
-		applied := &ApplyMsg{true, rf.log[rf.commitIndex].Command, rf.commitIndex}
+	if len(rf.log) <= args.LeaderCommit && len(rf.log)-1 >= 0 {
+		rf.commitIndex = len(rf.log)
+		applied := &ApplyMsg{true, rf.log[rf.commitIndex-1].Command, rf.commitIndex}
 		rf.applyCh <- *applied
 	}
 	DPrintf("%v (%v): Append/Heartbeat succeeded. My log: %v. My commitIndex: %v", rf.me, rf.state, rf.log, rf.commitIndex)
@@ -405,13 +407,13 @@ func (rf *Raft) sendHeartbeats() {
 				args.LeaderId = rf.me
 				args.PrevLogIndex = rf.leader.nextIndex[i] - 1
 				DPrintf("%v (%v): Sending Heartbeats. My log: %v. My commitIndex: %v", rf.me, rf.state, rf.log, rf.commitIndex)
-				if args.PrevLogIndex == -1 {
+				if args.PrevLogIndex == 0 {
 					args.PrevLogTerm = -1
 				} else {
-					args.PrevLogTerm = rf.log[args.PrevLogIndex].Term
+					args.PrevLogTerm = rf.log[args.PrevLogIndex-1].Term
 				}
-				if len(rf.log) > rf.leader.nextIndex[i] {
-					args.Entries = rf.log[rf.leader.nextIndex[i] : rf.leader.nextIndex[i]+1]
+				if len(rf.log) > rf.leader.nextIndex[i]-1 {
+					args.Entries = rf.log[rf.leader.nextIndex[i]-1 : rf.leader.nextIndex[i]]
 				} else {
 					args.Entries = make([]Log, 0)
 				}
@@ -440,13 +442,13 @@ func (rf *Raft) sendHeartbeats() {
 						}
 					}
 					DPrintf("%v: Agree Ct to see if commit: %v. Commit Index: %v", rf.me, agreeCt, rf.commitIndex)
-					if rf.leader.matchIndex[i] != -1 && agreeCt > len(rf.peers)/2 {
+					if rf.leader.matchIndex[i] != 0 && agreeCt > len(rf.peers)/2 {
 						rf.commitIndex = rf.leader.matchIndex[i]
-						applied := &ApplyMsg{true, rf.log[rf.leader.matchIndex[i]].Command, rf.commitIndex}
+						applied := &ApplyMsg{true, rf.log[rf.leader.matchIndex[i]-1].Command, rf.commitIndex}
 						rf.applyCh <- *applied
 					}
 				} else {
-					DPrintf("%v: Heartbeat to %v fails.", rf.me, i)
+					DPrintf("%v: Append to %v fails.", rf.me, i)
 					rf.leader.nextIndex[i]--
 				}
 				rf.mu.Unlock()
@@ -483,7 +485,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		Command: command,
 	}
 	rf.log = append(rf.log, *newLog)
-	index := len(rf.log) - 1
+	index := len(rf.log)
 	term := rf.currentTerm
 	isLeader := true
 
