@@ -361,7 +361,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	reply.Success = false
 	reply.Term = rf.currentTerm
 
-	DPrintf("%v (%v): Received heartbeat.Entries: %v. PrevLogIndex: %v. PrevLogTerm: %v", rf.me, rf.state, args.Entries, args.PrevLogIndex, args.PrevLogTerm)
+	DPrintf("%v (%v): Received heartbeat from %v. Entries: %v. PrevLogIndex: %v. PrevLogTerm: %v", rf.me, rf.state, args.LeaderId, args.Entries, args.PrevLogIndex, args.PrevLogTerm)
 	if args.Term < rf.currentTerm { // heartbeat from an old term, update the calling node
 		return
 	}
@@ -420,6 +420,9 @@ func (rf *Raft) sendHeartbeats() {
 
 			go func(i int) {
 				rf.mu.Lock()
+				if rf.killed() {
+					return
+				}
 				args := &AppendEntriesArgs{}
 				args.Term = rf.currentTerm
 				args.LeaderId = rf.me
@@ -524,6 +527,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 func (rf *Raft) Kill() {
 	atomic.StoreInt32(&rf.dead, 1)
 	// Your code here, if desired.
+	fmt.Printf("%v (%v): Killed. Log: %v \n", rf.me, rf.state, rf.log)
 }
 
 func (rf *Raft) killed() bool {
