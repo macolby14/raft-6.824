@@ -398,16 +398,17 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	// Follower has a different log at PrevLogIndex than leader
 	if args.PrevLogIndex != 0 && rf.log[args.PrevLogIndex-1].Term != args.PrevLogTerm {
 		reply.XTerm = rf.log[args.PrevLogIndex-1].Term
-		for i := args.PrevLogIndex - 1; i >= 0; i-- {
-			if rf.log[i].Term != reply.XTerm {
-				return
+		for i := args.PrevLogIndex; i >= 1; i-- {
+			if rf.log[i-1].Term != reply.XTerm {
+				break
 			}
-			reply.XIndex = i + 1
+			reply.XIndex = i
 		}
 		return
 	}
 
 	reply.Success = true
+	rf.log = rf.log[0:args.PrevLogIndex]
 	rf.log = append(rf.log, args.Entries...)
 	if len(rf.log) <= args.LeaderCommit && len(rf.log) > 0 {
 		oldCommit := rf.commitIndex
@@ -496,7 +497,15 @@ func (rf *Raft) sendHeartbeats() {
 				} else {
 					DPrintf("%v: Append to %v fails.", rf.me, i)
 
-					if reply.XLen < rf.leader.nextIndex[i] { //followers log is too short
+					/*
+						reply.leader.nextIndex[i] = 7
+						reply.XLen = 3
+
+						reply.leader.nextIndex[i] = 4
+
+					*/
+
+					if reply.XLen+1 < rf.leader.nextIndex[i] { //followers log is too short
 						rf.leader.nextIndex[i] = reply.XLen + 1
 					} else if reply.XTerm > rf.log[len(rf.log)-1].Term { //leader doesn't have this term
 						rf.leader.nextIndex[i] = reply.XIndex
@@ -561,7 +570,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 func (rf *Raft) Kill() {
 	atomic.StoreInt32(&rf.dead, 1)
 	// Your code here, if desired.
-	DPrintf("%v (%v): Killed. Log: %v \n", rf.me, rf.state, rf.log)
+	DPrintf("%v (%v): Killed. Log: %v Commited: %v\n", rf.me, rf.state, rf.log, rf.commitIndex)
 }
 
 func (rf *Raft) killed() bool {
