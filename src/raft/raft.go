@@ -495,7 +495,16 @@ func (rf *Raft) sendHeartbeats() {
 					}
 				} else {
 					DPrintf("%v: Append to %v fails.", rf.me, i)
-					rf.leader.nextIndex[i]--
+
+					if reply.XLen < rf.leader.nextIndex[i] { //followers log is too short
+						rf.leader.nextIndex[i] = reply.XLen + 1
+					} else if reply.XTerm > rf.log[len(rf.log)-1].Term { //leader doesn't have this term
+						rf.leader.nextIndex[i] = reply.XIndex
+					} else { // leader has that term
+						for rf.leader.nextIndex[i] > 0 && rf.log[rf.leader.nextIndex[i]-1].Term == reply.XTerm {
+							rf.leader.nextIndex[i]--
+						}
+					}
 				}
 				rf.mu.Unlock()
 			}(i)
