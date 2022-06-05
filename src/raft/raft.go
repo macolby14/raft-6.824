@@ -18,6 +18,7 @@ package raft
 //
 
 import (
+	"fmt"
 	"math"
 	"math/rand"
 	"sync"
@@ -56,6 +57,12 @@ type ApplyMsg struct {
 type Log struct {
 	Term    int
 	Command interface{}
+}
+
+func (l Log) String() string {
+	cmdStr := fmt.Sprintf("%v", l.Command)
+	cmdStr = cmdStr[0:int(math.Min(float64(len(cmdStr)), 10))]
+	return fmt.Sprintf("{Term: %v, Command: %v}", l.Term, cmdStr)
 }
 
 type LeaderState struct { // volatile, reinitiailized after elections
@@ -227,12 +234,25 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		reply.Term = rf.currentTerm
 		return
 	} else if args.Term > rf.currentTerm { // we haven't voted for this term yet, so lets vote
-		rf.state = "follower"
-		rf.votedFor = args.CandidateId
+		lastLogTerm := -1
+		lastLogIndex := 0
+		if len(rf.log) > 0 {
+			lastLogTerm = rf.log[len(rf.log)-1].Term
+			lastLogIndex = len(rf.log)
+		}
+
 		rf.currentTerm = args.Term
-		reply.VoteGranted = true
+		rf.state = "follower"
 		reply.Term = args.Term
+
+		if args.LastLogTerm > lastLogTerm || args.LastLogTerm == lastLogTerm && args.LastLogIndex >= lastLogIndex {
+			rf.votedFor = args.CandidateId
+			reply.VoteGranted = true
+		} else {
+			reply.VoteGranted = false
+		}
 	} else { //already voted for this term
+		// TODO - Why do we think we already voted? We could have restarted and need to check our voted state
 		reply.VoteGranted = false
 		reply.Term = rf.currentTerm
 	}
@@ -306,7 +326,7 @@ func (rf *Raft) initiateElection() {
 			if rf.state == "leader" { // we already won this election
 				return
 			}
-			DPrintf("%v: Received reply to vote request. %v %v", rf.me, i, reply)
+			DPrintf("%v: Received reply to vote request. %v Vote Granted: %v. Reply Term: %v", rf.me, i, reply.VoteGranted, reply.Term)
 			if reply.VoteGranted {
 				voteCt++
 			} else if reply.Term > rf.currentTerm { // we are behind in terms
@@ -365,6 +385,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	// Follower has a different log at PrevLogIndex than leader
 	if args.PrevLogIndex != 0 && rf.log[args.PrevLogIndex-1].Term != args.PrevLogTerm {
+		rf.log = rf.log[0 : args.PrevLogIndex-1]
 		return
 	}
 
@@ -406,7 +427,7 @@ func (rf *Raft) sendHeartbeats() {
 				args.Term = rf.currentTerm
 				args.LeaderId = rf.me
 				args.PrevLogIndex = rf.leader.nextIndex[i] - 1
-				DPrintf("%v (%v): Sending Heartbeats. My log: %v. My commitIndex: %v", rf.me, rf.state, rf.log, rf.commitIndex)
+				DPrintf("%v (%v): Sending Heartbeats. My term: %v. My log: %v. My commitIndex: %v", rf.me, rf.state, rf.currentTerm, rf.log, rf.commitIndex)
 				if args.PrevLogIndex == 0 {
 					args.PrevLogTerm = -1
 				} else {
