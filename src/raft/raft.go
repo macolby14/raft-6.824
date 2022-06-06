@@ -449,7 +449,7 @@ func (rf *Raft) sendHeartbeats() {
 					args.PrevLogTerm = rf.log[args.PrevLogIndex-1].Term
 				}
 				if len(rf.log) > rf.leader.nextIndex[i]-1 {
-					args.Entries = rf.log[rf.leader.nextIndex[i]-1 : rf.leader.nextIndex[i]]
+					args.Entries = rf.log[rf.leader.nextIndex[i]-1 : len(rf.log)]
 				} else {
 					args.Entries = make([]Log, 0)
 				}
@@ -469,19 +469,25 @@ func (rf *Raft) sendHeartbeats() {
 				}
 				if reply.Success {
 					DPrintf("%v (%v): Heartbeat to %v succeeds.", rf.me, rf.state, i)
+
 					rf.leader.nextIndex[i] += len(args.Entries)
 					rf.leader.matchIndex[i] = rf.leader.nextIndex[i] - 1
-					agreeCt := 0
-					for j := range rf.leader.matchIndex {
-						if j == rf.me || rf.leader.matchIndex[j] >= rf.leader.matchIndex[i] {
-							agreeCt++
+
+					for rf.commitIndex+1 <= rf.leader.matchIndex[i] {
+						agreeCt := 0
+						for j := range rf.leader.matchIndex {
+							if j == rf.me || rf.leader.matchIndex[j] >= rf.commitIndex+1 {
+								agreeCt++
+							}
 						}
-					}
-					DPrintf("%v: Agree Ct to see if commit: %v. Commit Index: %v", rf.me, agreeCt, rf.commitIndex)
-					if rf.leader.matchIndex[i] != 0 && agreeCt > len(rf.peers)/2 {
-						rf.commitIndex = rf.leader.matchIndex[i]
-						applied := &ApplyMsg{true, rf.log[rf.leader.matchIndex[i]-1].Command, rf.commitIndex}
-						rf.applyCh <- *applied
+						DPrintf("%v: Agree Ct to see if commit: %v. Commit Index: %v", rf.me, agreeCt, rf.commitIndex)
+						if rf.leader.matchIndex[i] != 0 && agreeCt > len(rf.peers)/2 {
+							applied := &ApplyMsg{true, rf.log[rf.commitIndex].Command, rf.commitIndex + 1}
+							rf.commitIndex++
+							rf.applyCh <- *applied
+						} else {
+							break
+						}
 					}
 				} else {
 					DPrintf("%v: Append to %v fails.", rf.me, i)
