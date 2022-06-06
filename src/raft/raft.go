@@ -360,6 +360,9 @@ type AppendEntriesArgs struct {
 type AppendEntriesReply struct {
 	Term    int  //current term, for leader to update itself
 	Success bool // true if folloewr contained entry matching prevLogIndex and prevLogTerm
+	XTerm   int  // term in the concluding entry
+	XIndex  int  // index of first entry with term
+	XLen    int  // log length
 }
 
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
@@ -539,7 +542,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 func (rf *Raft) Kill() {
 	atomic.StoreInt32(&rf.dead, 1)
 	// Your code here, if desired.
-	DPrintf("%v (%v): Killed. Log: %v \n", rf.me, rf.state, rf.log)
+	DPrintf("%v (%v): Killed. Log: %v Commited: %v\n", rf.me, rf.state, rf.log, rf.commitIndex)
 }
 
 func (rf *Raft) killed() bool {
