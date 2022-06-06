@@ -403,6 +403,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 				break
 			}
 			reply.XIndex = i
+			DPrintf("%v (%v): Follower has different log at PrevLogIndex. Logs: %v. XIndex: %v", rf.me, rf.state, rf.log, reply.XIndex)
 		}
 		return
 	}
@@ -410,6 +411,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	reply.Success = true
 	rf.log = rf.log[0:args.PrevLogIndex]
 	rf.log = append(rf.log, args.Entries...)
+	reply.XIndex = len(rf.log) + 1
 	if len(rf.log) <= args.LeaderCommit && len(rf.log) > 0 {
 		oldCommit := rf.commitIndex
 		rf.commitIndex = len(rf.log)
@@ -480,7 +482,7 @@ func (rf *Raft) sendHeartbeats() {
 				}
 				if reply.Success {
 					DPrintf("%v (%v): Heartbeat to %v succeeds.", rf.me, rf.state, i)
-					rf.leader.nextIndex[i] += len(args.Entries)
+					rf.leader.nextIndex[i] = reply.XIndex
 					rf.leader.matchIndex[i] = rf.leader.nextIndex[i] - 1
 					agreeCt := 0
 					for j := range rf.leader.matchIndex {
@@ -496,21 +498,17 @@ func (rf *Raft) sendHeartbeats() {
 					}
 				} else {
 					DPrintf("%v: Append to %v fails.", rf.me, i)
-
-					/*
-						reply.leader.nextIndex[i] = 7
-						reply.XLen = 3
-
-						reply.leader.nextIndex[i] = 4
-
-					*/
-
+					if len(rf.log) == 0 {
+						defer rf.mu.Unlock()
+						return
+					}
 					if reply.XLen+1 < rf.leader.nextIndex[i] { //followers log is too short
-						rf.leader.nextIndex[i] = reply.XLen + 1
+						rf.leader.nextIndex[i] = reply.XLen
 					} else if reply.XTerm > rf.log[len(rf.log)-1].Term { //leader doesn't have this term
 						rf.leader.nextIndex[i] = reply.XIndex
 					} else { // leader has that term
-						for rf.leader.nextIndex[i] > 0 && rf.log[rf.leader.nextIndex[i]-1].Term == reply.XTerm {
+						DPrintf("%v (%v): Leader Next Index for follower %v: %v. Leader log length: %v", rf.me, rf.state, i, rf.leader.nextIndex[i], len(rf.log))
+						for rf.leader.nextIndex[i] > 1 && rf.log[rf.leader.nextIndex[i]-2].Term == reply.XTerm { // nextIndex = 1 means that prevIndex = 0
 							rf.leader.nextIndex[i]--
 						}
 					}
