@@ -398,6 +398,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	}
 
 	reply.Success = true
+	rf.log = rf.log[0:args.PrevLogIndex] //follower may have extra logs that aren't commited from a different leader
 	rf.log = append(rf.log, args.Entries...)
 	if len(rf.log) <= args.LeaderCommit && len(rf.log) > 0 {
 		oldCommit := rf.commitIndex
@@ -449,7 +450,7 @@ func (rf *Raft) sendHeartbeats() {
 					args.PrevLogTerm = rf.log[args.PrevLogIndex-1].Term
 				}
 				if len(rf.log) > rf.leader.nextIndex[i]-1 {
-					args.Entries = rf.log[rf.leader.nextIndex[i]-1 : rf.leader.nextIndex[i]]
+					args.Entries = rf.log[rf.leader.nextIndex[i]-1 : len(rf.log)]
 				} else {
 					args.Entries = make([]Log, 0)
 				}
@@ -475,8 +476,11 @@ func (rf *Raft) sendHeartbeats() {
 						defer rf.mu.Unlock()
 						return
 					}
-					for j, log := range rf.log[rf.commitIndex:rf.leader.matchIndex[i]] {
-						logInd := j + rf.commitIndex + 1
+
+					oldCommitIndex := rf.commitIndex
+
+					for j, log := range rf.log[oldCommitIndex:rf.leader.matchIndex[i]] {
+						logInd := j + oldCommitIndex + 1
 						agreeCt := 0
 						for k := range rf.leader.matchIndex {
 							if k == rf.me || rf.leader.matchIndex[k] >= logInd {
