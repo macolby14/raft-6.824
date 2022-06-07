@@ -385,7 +385,9 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	rf.lastHeartbeat = time.Now()
 	rf.state = "follower" // if we get a heartbeat from someone else ahead of us in terms... they were elected leader
-
+	reply.XLen = len(rf.log)
+	reply.XTerm = 0
+	reply.XIndex = 0
 	// Follower is missing some logs. Follower doesn't have what the leader wants to check
 	if args.PrevLogIndex > len(rf.log) {
 		return
@@ -393,6 +395,11 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	// Follower has a different log at PrevLogIndex than leader
 	if args.PrevLogIndex != 0 && rf.log[args.PrevLogIndex-1].Term != args.PrevLogTerm {
+		reply.XTerm = rf.log[args.PrevLogIndex-1].Term
+		reply.XIndex = args.PrevLogIndex - 1
+		for reply.XIndex-1 >= 0 && rf.log[reply.XIndex-1].Term == reply.XTerm {
+			reply.XIndex--
+		}
 		rf.log = rf.log[0 : args.PrevLogIndex-1]
 		return
 	}
@@ -496,7 +503,23 @@ func (rf *Raft) sendHeartbeats() {
 					}
 				} else {
 					DPrintf("%v: Append to %v fails.", rf.me, i)
-					rf.leader.nextIndex[i]--
+					// rf.leader.nextIndex[i]--
+					rightIndex := args.PrevLogIndex - 1
+
+					if reply.XTerm == 0 {
+						rf.leader.nextIndex[i] = reply.XLen
+						defer rf.mu.Unlock()
+						return
+					}
+
+					for rightIndex-1 >= 0 && rf.log[rightIndex-1].Term > reply.XTerm {
+						rightIndex--
+					}
+					if rightIndex-1 >= 0 && rf.log[rightIndex-1].Term != reply.XTerm {
+						rf.leader.nextIndex[i] = reply.XIndex
+					} else {
+						rf.leader.nextIndex[i] = rightIndex
+					}
 				}
 				rf.mu.Unlock()
 			}(i)
