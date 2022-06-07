@@ -385,9 +385,9 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	rf.lastHeartbeat = time.Now()
 	rf.state = "follower" // if we get a heartbeat from someone else ahead of us in terms... they were elected leader
-
 	reply.XLen = len(rf.log)
-
+	reply.XTerm = 0
+	reply.XIndex = 0
 	// Follower is missing some logs. Follower doesn't have what the leader wants to check
 	if args.PrevLogIndex > len(rf.log) {
 		reply.XTerm = 0
@@ -398,18 +398,16 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	// Follower has a different log at PrevLogIndex than leader
 	if args.PrevLogIndex != 0 && rf.log[args.PrevLogIndex-1].Term != args.PrevLogTerm {
 		reply.XTerm = rf.log[args.PrevLogIndex-1].Term
-		for i := args.PrevLogIndex; i >= 1; i-- {
-			if rf.log[i-1].Term != reply.XTerm {
-				break
-			}
-			reply.XIndex = i
-			DPrintf("%v (%v): Follower has different log at PrevLogIndex. Logs: %v. XIndex: %v", rf.me, rf.state, rf.log, reply.XIndex)
+		reply.XIndex = args.PrevLogIndex - 1
+		for reply.XIndex-1 >= 0 && rf.log[reply.XIndex-1].Term == reply.XTerm {
+			reply.XIndex--
 		}
+		rf.log = rf.log[0 : args.PrevLogIndex-1]
 		return
 	}
 
 	reply.Success = true
-	rf.log = rf.log[0:args.PrevLogIndex]
+	rf.log = rf.log[0:args.PrevLogIndex] //follower may have extra logs that aren't commited from a different leader
 	rf.log = append(rf.log, args.Entries...)
 	reply.XIndex = len(rf.log) + 1
 	if len(rf.log) <= args.LeaderCommit && len(rf.log) > 0 {
@@ -462,7 +460,7 @@ func (rf *Raft) sendHeartbeats() {
 					args.PrevLogTerm = rf.log[args.PrevLogIndex-1].Term
 				}
 				if len(rf.log) > rf.leader.nextIndex[i]-1 {
-					args.Entries = rf.log[rf.leader.nextIndex[i]-1 : rf.leader.nextIndex[i]]
+					args.Entries = rf.log[rf.leader.nextIndex[i]-1 : len(rf.log)]
 				} else {
 					args.Entries = make([]Log, 0)
 				}
@@ -484,33 +482,46 @@ func (rf *Raft) sendHeartbeats() {
 					DPrintf("%v (%v): Heartbeat to %v succeeds.", rf.me, rf.state, i)
 					rf.leader.nextIndex[i] = reply.XIndex
 					rf.leader.matchIndex[i] = rf.leader.nextIndex[i] - 1
-					agreeCt := 0
-					for j := range rf.leader.matchIndex {
-						if j == rf.me || rf.leader.matchIndex[j] >= rf.leader.matchIndex[i] {
-							agreeCt++
-						}
-					}
-					DPrintf("%v: Agree Ct to see if commit: %v. Commit Index: %v", rf.me, agreeCt, rf.commitIndex)
-					if rf.leader.matchIndex[i] != 0 && agreeCt > len(rf.peers)/2 {
-						rf.commitIndex = rf.leader.matchIndex[i]
-						applied := &ApplyMsg{true, rf.log[rf.leader.matchIndex[i]-1].Command, rf.commitIndex}
-						rf.applyCh <- *applied
-					}
-				} else {
-					DPrintf("%v: Append to %v fails.", rf.me, i)
-					if len(rf.log) == 0 {
+					if rf.commitIndex >= rf.leader.matchIndex[i] { // appending to a follower that was behind the leaders commits
 						defer rf.mu.Unlock()
 						return
 					}
-					if reply.XLen+1 < rf.leader.nextIndex[i] { //followers log is too short
-						rf.leader.nextIndex[i] = reply.XLen
-					} else if reply.XTerm > rf.log[len(rf.log)-1].Term { //leader doesn't have this term
-						rf.leader.nextIndex[i] = reply.XIndex
-					} else { // leader has that term
-						DPrintf("%v (%v): Leader Next Index for follower %v: %v. Leader log length: %v", rf.me, rf.state, i, rf.leader.nextIndex[i], len(rf.log))
-						for rf.leader.nextIndex[i] > 1 && rf.log[rf.leader.nextIndex[i]-2].Term == reply.XTerm { // nextIndex = 1 means that prevIndex = 0
-							rf.leader.nextIndex[i]--
+
+					oldCommitIndex := rf.commitIndex
+
+					for j, log := range rf.log[oldCommitIndex:rf.leader.matchIndex[i]] {
+						logInd := j + oldCommitIndex + 1
+						agreeCt := 0
+						for k := range rf.leader.matchIndex {
+							if k == rf.me || rf.leader.matchIndex[k] >= logInd {
+								agreeCt++
+							}
 						}
+						DPrintf("%v: Agree Ct to see if commit: %v. Commit Index: %v", rf.me, agreeCt, rf.commitIndex)
+						if logInd != 0 && agreeCt > len(rf.peers)/2 {
+							rf.commitIndex = logInd
+							applied := &ApplyMsg{true, log.Command, rf.commitIndex}
+							rf.applyCh <- *applied
+						}
+					}
+				} else {
+					DPrintf("%v: Append to %v fails.", rf.me, i)
+					// rf.leader.nextIndex[i]--
+					rightIndex := args.PrevLogIndex - 1
+
+					if reply.XTerm == 0 {
+						rf.leader.nextIndex[i] = reply.XLen
+						defer rf.mu.Unlock()
+						return
+					}
+
+					for rightIndex-1 >= 0 && rf.log[rightIndex-1].Term > reply.XTerm {
+						rightIndex--
+					}
+					if rightIndex-1 >= 0 && rf.log[rightIndex-1].Term != reply.XTerm {
+						rf.leader.nextIndex[i] = reply.XIndex
+					} else {
+						rf.leader.nextIndex[i] = rightIndex
 					}
 				}
 				rf.mu.Unlock()
