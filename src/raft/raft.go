@@ -471,17 +471,24 @@ func (rf *Raft) sendHeartbeats() {
 					DPrintf("%v (%v): Heartbeat to %v succeeds.", rf.me, rf.state, i)
 					rf.leader.nextIndex[i] += len(args.Entries)
 					rf.leader.matchIndex[i] = rf.leader.nextIndex[i] - 1
-					agreeCt := 0
-					for j := range rf.leader.matchIndex {
-						if j == rf.me || rf.leader.matchIndex[j] >= rf.leader.matchIndex[i] {
-							agreeCt++
-						}
+					if rf.commitIndex >= rf.leader.matchIndex[i] { // appending to a follower that was behind the leaders commits
+						defer rf.mu.Unlock()
+						return
 					}
-					DPrintf("%v: Agree Ct to see if commit: %v. Commit Index: %v", rf.me, agreeCt, rf.commitIndex)
-					if rf.leader.matchIndex[i] != 0 && agreeCt > len(rf.peers)/2 {
-						rf.commitIndex = rf.leader.matchIndex[i]
-						applied := &ApplyMsg{true, rf.log[rf.leader.matchIndex[i]-1].Command, rf.commitIndex}
-						rf.applyCh <- *applied
+					for j, log := range rf.log[rf.commitIndex:rf.leader.matchIndex[i]] {
+						logInd := j + rf.commitIndex + 1
+						agreeCt := 0
+						for k := range rf.leader.matchIndex {
+							if k == rf.me || rf.leader.matchIndex[k] >= logInd {
+								agreeCt++
+							}
+						}
+						DPrintf("%v: Agree Ct to see if commit: %v. Commit Index: %v", rf.me, agreeCt, rf.commitIndex)
+						if logInd != 0 && agreeCt > len(rf.peers)/2 {
+							rf.commitIndex = logInd
+							applied := &ApplyMsg{true, log.Command, rf.commitIndex}
+							rf.applyCh <- *applied
+						}
 					}
 				} else {
 					DPrintf("%v: Append to %v fails.", rf.me, i)
