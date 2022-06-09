@@ -18,6 +18,7 @@ package raft
 //
 
 import (
+	"bytes"
 	"fmt"
 	"math"
 	"math/rand"
@@ -25,6 +26,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"raft-6.824/labgob"
 	"raft-6.824/labrpc"
 )
 
@@ -159,42 +161,42 @@ func (rf *Raft) GetState() (int, bool) {
 func (rf *Raft) persist() {
 	// Your code here (2C).
 	// Example:
-	// w := new(bytes.Buffer)
-	// e := labgob.NewEncoder(w)
-	// rf.mu.Lock()
-	// e.Encode(rf.currentTerm)
-	// e.Encode(rf.votedFor)
-	// e.Encode(rf.log)
-	// rf.mu.Unlock()
-	// data := w.Bytes()
-	// rf.persister.SaveRaftState(data)
+	w := new(bytes.Buffer)
+	e := labgob.NewEncoder(w)
+	rf.mu.Lock()
+	e.Encode(rf.currentTerm)
+	e.Encode(rf.votedFor)
+	e.Encode(rf.log)
+	rf.mu.Unlock()
+	data := w.Bytes()
+	rf.persister.SaveRaftState(data)
 }
 
 //
 // restore previously persisted state.
 //
 func (rf *Raft) readPersist(data []byte) {
-	// if data == nil || len(data) < 1 { // bootstrap without any state?
-	// 	return
-	// }
-	// // Your code here (2C).
-	// // Example:
-	// r := bytes.NewBuffer(data)
-	// d := labgob.NewDecoder(r)
-	// var currentTerm int
-	// var votedFor int
-	// var log []Log
-	// if d.Decode(&currentTerm) != nil ||
-	// 	d.Decode(&votedFor) != nil ||
-	// 	d.Decode(&log) != nil {
-	// 	panic("Error decoding in readPersist")
-	// } else {
-	// 	rf.mu.Lock()
-	// 	rf.currentTerm = currentTerm
-	// 	rf.votedFor = votedFor
-	// 	rf.log = log
-	// 	rf.mu.Unlock()
-	// }
+	if data == nil || len(data) < 1 { // bootstrap without any state?
+		return
+	}
+	// Your code here (2C).
+	// Example:
+	r := bytes.NewBuffer(data)
+	d := labgob.NewDecoder(r)
+	var currentTerm int
+	var votedFor int
+	var log []Log
+	if d.Decode(&currentTerm) != nil ||
+		d.Decode(&votedFor) != nil ||
+		d.Decode(&log) != nil {
+		panic("Error decoding in readPersist")
+	} else {
+		rf.mu.Lock()
+		rf.currentTerm = currentTerm
+		rf.votedFor = votedFor
+		rf.log = log
+		rf.mu.Unlock()
+	}
 }
 
 //
@@ -249,6 +251,9 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 			reply.VoteGranted = false
 			DPrintf("%v (%v): Denying vote to %v because its log is not up to date. Other (Term and Index) (%v %v). My (Term and Index): (%v %v)\n", rf.me, rf.state, args.CandidateId, args.LastLogTerm, args.LastLogIndex, lastLogTerm, lastLogIndex)
 		}
+
+		rf.persist();
+
 	} else { //already voted for this term
 		// TODO - Why do we think we already voted? We could have restarted and need to check our voted state
 		DPrintf("%v (%v): Denying vote to %v because we already voted for %v.\n", rf.me, rf.state, args.CandidateId, rf.votedFor)
@@ -300,6 +305,7 @@ func (rf *Raft) initiateElection() {
 	rf.state = "candidate"
 	rf.votedFor = rf.me
 	voteCt := 1
+	rf.persist()
 	rf.mu.Unlock()
 	for i := range rf.peers {
 		if i == rf.me {
@@ -337,6 +343,7 @@ func (rf *Raft) initiateElection() {
 			} else if reply.Term > rf.currentTerm { // we are behind in terms
 				rf.currentTerm = reply.Term
 				rf.state = "follower"
+				rf.persist()
 			}
 			if rf.currentTerm == args.Term && voteCt >= majority {
 				DPrintf("%v: Won the election", rf.me)
@@ -409,6 +416,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	reply.Success = true
 	rf.log = rf.log[0:args.PrevLogIndex] //follower may have extra logs that aren't commited from a different leader
 	rf.log = append(rf.log, args.Entries...)
+	rf.persist()
 	reply.XIndex = len(rf.log) + 1
 	if len(rf.log) <= args.LeaderCommit && len(rf.log) > 0 {
 		oldCommit := rf.commitIndex
@@ -476,6 +484,7 @@ func (rf *Raft) sendHeartbeats() {
 					defer rf.mu.Unlock()
 					rf.state = "follower"
 					rf.currentTerm = reply.Term
+					rf.persist()
 					return
 				}
 				if reply.Success {
@@ -561,7 +570,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	index := len(rf.log)
 	term := rf.currentTerm
 	isLeader := true
-
+	rf.persist()
 	return index, term, isLeader
 }
 
@@ -605,6 +614,8 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.persister = persister
 	rf.me = me
 	rf.applyCh = applyCh
+
+
 
 	// Your initialization code here (2A, 2B, 2C).
 	rf.init()
