@@ -253,8 +253,6 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 			DPrintf("%v (%v): Denying vote to %v because its log is not up to date. Other (Term and Index) (%v %v). My (Term and Index): (%v %v)\n", rf.me, rf.state, args.CandidateId, args.LastLogTerm, args.LastLogIndex, lastLogTerm, lastLogIndex)
 		}
 
-		// rf.persist()
-
 	} else { //already voted for this term
 		// TODO - Why do we think we already voted? We could have restarted and need to check our voted state
 		DPrintf("%v (%v): Denying vote to %v because we already voted for %v.\n", rf.me, rf.state, args.CandidateId, rf.votedFor)
@@ -263,6 +261,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	}
 
 	rf.mu.Unlock()
+	rf.persist()
 }
 
 //
@@ -308,8 +307,8 @@ func (rf *Raft) initiateElection() {
 	rf.state = "candidate"
 	rf.votedFor = rf.me
 	voteCt := 1
-	// rf.persist()
 	rf.mu.Unlock()
+	rf.persist()
 	for i := range rf.peers {
 		if i == rf.me {
 			continue
@@ -348,7 +347,9 @@ func (rf *Raft) initiateElection() {
 			} else if reply.Term > rf.currentTerm { // we are behind in terms
 				rf.currentTerm = reply.Term
 				rf.state = "follower"
-				// rf.persist()
+				rf.mu.Unlock()
+				rf.persist()
+				rf.mu.Lock()
 			}
 			if rf.currentTerm == args.Term && voteCt >= majority {
 				DPrintf("%v: Won the election", rf.me)
@@ -424,7 +425,9 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	reply.Success = true
 	rf.log = rf.log[0:args.PrevLogIndex] //follower may have extra logs that aren't commited from a different leader
 	rf.log = append(rf.log, args.Entries...)
-	// rf.persist()
+	rf.mu.Unlock()
+	rf.persist()
+	rf.mu.Lock()
 	reply.XIndex = len(rf.log) + 1
 	if len(rf.log) <= args.LeaderCommit && len(rf.log) > 0 {
 		oldCommit := rf.commitIndex
@@ -492,8 +495,8 @@ func (rf *Raft) sendHeartbeats() {
 				if reply.Term > rf.currentTerm {
 					rf.state = "follower"
 					rf.currentTerm = reply.Term
-					// rf.persist()
 					rf.mu.Unlock()
+					rf.persist()
 					return
 				}
 				if reply.Success {
@@ -579,8 +582,8 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	index := len(rf.log)
 	term := rf.currentTerm
 	isLeader := true
-	// rf.persist()
 	rf.mu.Unlock()
+	rf.persist()
 	return index, term, isLeader
 }
 
