@@ -510,7 +510,11 @@ func (rf *Raft) sendHeartbeats() {
 
 					oldCommitIndex := rf.commitIndex
 
-					for j, log := range rf.log[oldCommitIndex:rf.leader.matchIndex[i]] {
+					for j := len(rf.log[oldCommitIndex:rf.leader.matchIndex[i]]) - 1; j >= 0; j-- {
+						log := rf.log[oldCommitIndex+j]
+						if log.Term != rf.currentTerm { // Figure 8. Cannot commit from old
+							break
+						}
 						logInd := j + oldCommitIndex + 1
 						agreeCt := 0
 						for k := range rf.leader.matchIndex {
@@ -520,9 +524,12 @@ func (rf *Raft) sendHeartbeats() {
 						}
 						DPrintf("%v: Agree Ct to see if commit: %v. Commit Index: %v", rf.me, agreeCt, rf.commitIndex)
 						if logInd != 0 && agreeCt > len(rf.peers)/2 {
-							rf.commitIndex = logInd
-							applied := &ApplyMsg{true, log.Command, rf.commitIndex}
-							rf.applyCh <- *applied
+							for k, commitLog := range rf.log[oldCommitIndex : oldCommitIndex+j+1] {
+								rf.commitIndex = k + oldCommitIndex + 1
+								applied := &ApplyMsg{true, commitLog.Command, rf.commitIndex}
+								rf.applyCh <- *applied
+							}
+							break
 						}
 					}
 				} else {
