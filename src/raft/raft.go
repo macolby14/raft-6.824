@@ -469,6 +469,10 @@ func (rf *Raft) sendHeartbeats() {
 				if rf.killed() {
 					return
 				}
+				if rf.state != "leader" {
+					rf.mu.Unlock()
+					return
+				}
 				args := &AppendEntriesArgs{}
 				args.Term = rf.currentTerm
 				args.LeaderId = rf.me
