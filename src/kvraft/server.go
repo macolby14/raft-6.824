@@ -89,9 +89,9 @@ func (kv *KVServer) init() {
 		cmd := msg.Command.(Op)
 		kv.mu.Lock()
 		switch cmd.OpType{
-		case "get": 
-		case "put": kv.store[cmd.OpKey] = cmd.OpVal
-		case "append": kv.store[cmd.OpKey] = kv.store[cmd.OpKey] + cmd.OpVal
+		case "Get": 
+		case "Put": kv.store[cmd.OpKey] = cmd.OpVal
+		case "Append": kv.store[cmd.OpKey] = kv.store[cmd.OpKey] + cmd.OpVal
 		default: panic("Invalid command opType")
 		}
 		kv.status[fmt.Sprint(msg.CommandIndex)+fmt.Sprint(cmd)] = true
@@ -105,7 +105,7 @@ reply - (Err, Value)
 */
 func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	// Your code here.
-	op := &Op{"get", args.Key,""}
+	op := &Op{"Get", args.Key,""}
 	commitInd, _, isLeader := kv.rf.Start(*op)
 	if !isLeader{
 		reply.Err = "Not leader"
