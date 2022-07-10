@@ -75,6 +75,26 @@ func (ck *Clerk) Get(key string) string {
 //
 func (ck *Clerk) PutAppend(key string, value string, op string) {
 	// You will have to modify this function.
+	for{
+
+		args := &PutAppendArgs{key,value,op}
+		reply := &PutAppendReply{} 
+
+		if ck.lastLeader != -1 {
+			ok := ck.servers[ck.lastLeader].Call("KVServer.PutAppend",&args, &reply)
+			if ok && reply.Err == "" {
+				return
+			}
+		}
+
+		for i := range ck.servers {
+			ok := ck.servers[i].Call("KVServer.PutAppend",&args, &reply)
+			if ok && reply.Err == "" {
+				ck.lastLeader = i
+				return
+			}
+		}
+	}
 }
 
 func (ck *Clerk) Put(key string, value string) {
