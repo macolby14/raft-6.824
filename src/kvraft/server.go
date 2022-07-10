@@ -1,14 +1,21 @@
 package kvraft
 
 import (
+	"fmt"
 	"log"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"raft-6.824/labgob"
 	"raft-6.824/labrpc"
 	"raft-6.824/raft"
 )
+
+/*
+
+ */
+
 
 const Debug = 0
 
@@ -23,6 +30,8 @@ type Op struct {
 	// Your definitions here.
 	// Field names must start with capital letters,
 	// otherwise RPC will break.
+	OpType string
+	OpVal string
 }
 
 type KVServer struct {
@@ -31,14 +40,73 @@ type KVServer struct {
 	rf      *raft.Raft
 	applyCh chan raft.ApplyMsg
 	dead    int32 // set by Kill()
-
 	maxraftstate int // snapshot if log grows this big
 
 	// Your definitions here.
+	store 	map[string]string
+	status 	map[string]bool
 }
 
+/*
+Get and PutAppend
+Call raft.Start() -> func (rf *Raft) Start(command interface{}) (int, int, bool)
+- First arg is index if it is ever commited
+- Second arg is term
+- Third arg is if it thinks it is the leader
+
+If raft is not the leader, return (Error, nil). Client will handle retrying
+	- We could point at who this server's raft voted for error, but not authoritative
+
+
+If raft thinks it is the leader and is the leader, we will receive ApplyMsg{CommandValid bool, Command interface{}, index} 
+
+We can block by waiting for an applyCh value.
+
+Concurrency?
+- We submit a command
+- Another server submits a command
+- Raft logs the other servers command and we see it on the applyCh
+- We see our command on the applyCh
+
+Solution: 
+- Check the commitIndex to verify this is the correct command. If not, keep waiting.
+- We need to handle any other comamnds that change the KV state. Since they overlap, it is fine to return the other value first.
+- Commit our value to the state and then return.
+*/
+
+/**
+args - (Key)
+reply - (Err, Value)
+*/
 func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	// Your code here.
+	op := &Op{"get", args.Key}
+	commitInd, term, isLeader := kv.rf.Start(*op)
+	if !isLeader{
+		reply.Err = "Not leader"
+		return
+	}
+	// I think commitInd and term together are a good unique kep
+	statusKey := fmt.Sprintf("%v:%v",commitInd,term)
+	kv.mu.Lock()
+	kv.status[statusKey] = false
+	kv.mu.Unlock()
+
+	for {
+		time.Sleep(100 * time.Millisecond)
+		kv.mu.Lock()
+		if kv.status[statusKey] {
+			v, exists := kv.store[args.Key]
+			if !exists {
+				reply.Value = ""
+			}else{
+				reply.Value = v
+			}
+			kv.mu.Unlock()
+			return
+		}
+		kv.mu.Unlock()
+	}
 }
 
 func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
