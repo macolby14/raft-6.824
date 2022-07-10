@@ -31,7 +31,12 @@ type Op struct {
 	// Field names must start with capital letters,
 	// otherwise RPC will break.
 	OpType string
+	OpKey string
 	OpVal string
+}
+
+func (op *Op) String() string{
+	return fmt.Sprintf("%v %v %v",op.OpType,op.OpKey,op.OpVal)
 }
 
 type KVServer struct {
@@ -46,6 +51,7 @@ type KVServer struct {
 	store 	map[string]string
 	status 	map[string]bool
 }
+
 
 /*
 Get and PutAppend
@@ -74,20 +80,39 @@ Solution:
 - Commit our value to the state and then return.
 */
 
+
+func (kv *KVServer) init() {
+	for msg := range kv.applyCh {
+		if !msg.CommandValid {
+			panic("Invalid command in applyCh not expected")
+		}
+		cmd := msg.Command.(Op)
+		kv.mu.Lock()
+		switch cmd.OpType{
+		case "get": 
+		case "put": kv.store[cmd.OpKey] = cmd.OpVal
+		case "append": kv.store[cmd.OpKey] = kv.store[cmd.OpKey] + cmd.OpVal
+		default: panic("Invalid command opType")
+		}
+		kv.status[fmt.Sprint(msg.CommandIndex)+fmt.Sprint(cmd)] = true
+		kv.mu.Unlock()
+	}
+}
+
 /**
 args - (Key)
 reply - (Err, Value)
 */
 func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	// Your code here.
-	op := &Op{"get", args.Key}
-	commitInd, term, isLeader := kv.rf.Start(*op)
+	op := &Op{"get", args.Key,""}
+	commitInd, _, isLeader := kv.rf.Start(*op)
 	if !isLeader{
 		reply.Err = "Not leader"
 		return
 	}
 	// I think commitInd and term together are a good unique kep
-	statusKey := fmt.Sprintf("%v:%v",commitInd,term)
+	statusKey := fmt.Sprint(commitInd)+fmt.Sprint(op)
 	kv.mu.Lock()
 	kv.status[statusKey] = false
 	kv.mu.Unlock()
