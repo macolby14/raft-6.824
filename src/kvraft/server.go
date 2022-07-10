@@ -134,8 +134,50 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	}
 }
 
+// type PutAppendArgs struct {
+// 	Key   string
+// 	Value string
+// 	Op    string // "Put" or "Append"
+// 	// You'll have to add definitions here.
+// 	// Field names must start with capital letters,
+// 	// otherwise RPC will break.
+// }
+
+// type PutAppendReply struct {
+// 	Err Err
+// }
+
+
 func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	// Your code here.
+		// Your code here.
+		op := &Op{args.Op, args.Key, args.Value}
+		commitInd, _, isLeader := kv.rf.Start(*op)
+		if !isLeader{
+			reply.Err = "Not leader"
+			return
+		}
+		// I think commitInd and term together are a good unique kep
+		statusKey := fmt.Sprint(commitInd)+fmt.Sprint(op)
+		kv.mu.Lock()
+		kv.status[statusKey] = false
+		kv.mu.Unlock()
+	
+		for {
+			time.Sleep(100 * time.Millisecond)
+			kv.mu.Lock()
+			if kv.status[statusKey] {
+				_, exists := kv.store[args.Key]
+				if !exists {
+					panic("Key does not exist after put/append")
+				}else{
+					reply.Err = ""
+				}
+				kv.mu.Unlock()
+				return
+			}
+			kv.mu.Unlock()
+		}
 }
 
 //
