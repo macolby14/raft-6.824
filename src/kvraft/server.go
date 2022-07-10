@@ -82,7 +82,12 @@ Solution:
 
 
 func (kv *KVServer) init() {
-	for msg := range kv.applyCh {
+
+	kv.status = make(map[string]bool)
+	kv.store = make(map[string]string)
+	
+	go func() { 
+		for msg := range kv.applyCh {
 		if !msg.CommandValid {
 			panic("Invalid command in applyCh not expected")
 		}
@@ -97,6 +102,7 @@ func (kv *KVServer) init() {
 		kv.status[fmt.Sprint(msg.CommandIndex)+fmt.Sprint(cmd)] = true
 		kv.mu.Unlock()
 	}
+	}()
 }
 
 /**
@@ -181,7 +187,7 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 }
 
 //
-// the tester calls Kill() when a KVServer instance won't
+// the tester 1s Kill() when a KVServer instance won't
 // be needed again. for your convenience, we supply
 // code to set rf.dead (without needing a lock),
 // and a killed() method to test rf.dead in
@@ -225,6 +231,7 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv.maxraftstate = maxraftstate
 
 	// You may need initialization code here.
+	kv.init()
 
 	kv.applyCh = make(chan raft.ApplyMsg)
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
