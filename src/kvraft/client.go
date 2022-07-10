@@ -9,6 +9,7 @@ import (
 
 type Clerk struct {
 	servers []*labrpc.ClientEnd
+	lastLeader int 
 	// You will have to modify this struct.
 }
 
@@ -22,6 +23,7 @@ func nrand() int64 {
 func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 	ck := new(Clerk)
 	ck.servers = servers
+	ck.lastLeader = -1
 	// You'll have to add code here.
 	return ck
 }
@@ -39,9 +41,26 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 // arguments. and reply must be passed as a pointer.
 //
 func (ck *Clerk) Get(key string) string {
+	for{
 
-	// You will have to modify this function.
-	return ""
+		args := &GetArgs{key}
+		reply := &GetReply{} 
+
+		if ck.lastLeader != -1 {
+			ok := ck.servers[ck.lastLeader].Call("KVServer.Get",&args, &reply)
+			if ok && reply.Err == "" {
+				return reply.Value
+			}
+		}
+
+		for i := range ck.servers {
+			ok := ck.servers[i].Call("KVServer.Get",&args, &reply)
+			if ok && reply.Err == "" {
+				ck.lastLeader = i
+				return reply.Value
+			}
+		}
+	}
 }
 
 //
